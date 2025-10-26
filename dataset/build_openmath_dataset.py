@@ -120,8 +120,31 @@ def convert_dataset(config: DataProcessConfig):
     if qcol is None:
         raise RuntimeError(f"Could not find a text column for inputs. Available columns: {list(df.columns)}")
 
-    print(f"Using columns: question='{qcol}' answer='{acol}'")
+    max_seq_len = 0  # Initialize max_seq_len
 
+    # First pass to determine max_seq_len
+    for split in split_values:
+        if split == "all":
+            subdf = df
+        else:
+            subdf = df[df["split"] == split]
+
+        inputs: List[str] = []
+        labels: List[str] = []
+
+        for i, row in tqdm(subdf.iterrows(), total=len(subdf), desc=f"Collecting ({split})"):
+            q = row.get(qcol, "")
+            a = row.get(acol, "")
+
+            inputs.append(str(q))
+            labels.append(str(a))
+
+        # Calculate max sequence length for this split
+        max_inp = max((len(s) for s in inputs), default=0)
+        max_lab = max((len(s) for s in labels), default=0)
+        max_seq_len = max(max_seq_len, max(max_inp, max_lab))
+
+    # Second pass to encode with the determined max_seq_len
     for split in split_values:
         if split == "all":
             subdf = df
@@ -139,34 +162,10 @@ def convert_dataset(config: DataProcessConfig):
 
         for i, row in tqdm(subdf.iterrows(), total=len(subdf), desc=f"Collecting ({split})"):
             q = row.get(qcol, "")
-            a = ""
-            if acol is not None and acol in row:
-                a = row.get(acol, "")
-
-            # Ensure strings
-            if q is None:
-                q = ""
-            if a is None:
-                a = ""
+            a = row.get(acol, "")
 
             inputs.append(str(q))
             labels.append(str(a))
-
-        # Build character vocabulary from observed characters
-        all_text = "".join(inputs) + "".join(labels)
-        unique_chars = sorted(set(all_text))
-
-        # Map chars to ids starting at 1 (0 reserved for PAD)
-        char2id = {ch: idx + 1 for idx, ch in enumerate(unique_chars)}
-
-        if config.max_seq_len is not None:
-            seq_len = int(config.max_seq_len)
-        else:
-            max_inp = max((len(s) for s in inputs), default=0)
-            max_lab = max((len(s) for s in labels), default=0)
-            seq_len = max(max_inp, max_lab)
-
-        n_examples = len(inputs)
 
         # Prepare results containers
         results = {k: [] for k in ["inputs", "labels", "puzzle_identifiers", "puzzle_indices", "group_indices"]}
@@ -176,10 +175,10 @@ def convert_dataset(config: DataProcessConfig):
         results["group_indices"].append(0)
 
         for inp, lab in zip(tqdm(inputs, desc=f"Encoding ({split})"), labels):
-            # encode to ids and pad/truncate to seq_len
+            # encode to ids and pad/truncate to max_seq_len
             def _encode(s: str):
-                arr = np.zeros(seq_len, dtype=np.int32)
-                for i, ch in enumerate(s[:seq_len]):
+                arr = np.zeros(max_seq_len, dtype=np.int32)
+                for i, ch in enumerate(s[:max_seq_len]):
                     arr[i] = char2id.get(ch, 0)
                 return arr
 
@@ -196,8 +195,8 @@ def convert_dataset(config: DataProcessConfig):
 
         # Convert to numpy arrays
         results_np = {
-            "inputs": np.stack(results["inputs"], axis=0) if len(results["inputs"]) > 0 else np.zeros((0, seq_len), dtype=np.int32),
-            "labels": np.stack(results["labels"], axis=0) if len(results["labels"]) > 0 else np.zeros((0, seq_len), dtype=np.int32),
+            "inputs": np.stack(results["inputs"], axis=0) if len(results["inputs"]) > 0 else np.zeros((0, max_seq_len), dtype=np.int32),
+            "labels": np.stack(results["labels"], axis=0) if len(results["labels"]) > 0 else np.zeros((0, max_seq_len), dtype=np.int32),
             "group_indices": np.array(results["group_indices"], dtype=np.int32),
             "puzzle_indices": np.array(results["puzzle_indices"], dtype=np.int32),
             "puzzle_identifiers": np.array(results["puzzle_identifiers"], dtype=np.int32),
@@ -205,7 +204,7 @@ def convert_dataset(config: DataProcessConfig):
 
         # Metadata
         metadata = PuzzleDatasetMetadata(
-            seq_len=seq_len,
+            seq_len=max_seq_len,
             vocab_size=len(char2id) + 1,  # PAD + chars
             pad_id=0,
             ignore_label_id=0,
@@ -233,9 +232,9 @@ def convert_dataset(config: DataProcessConfig):
 
         # Save character vocabulary for reproducibility
         with open(os.path.join(config.output_dir, "char_vocab.json"), "w") as f:
-            json.dump({"char2id": char2id, "seq_len": seq_len}, f)
+            json.dump({"char2id": char2id, "seq_len": max_seq_len}, f)
 
-        print(f"Saved split '{split}' with {n_examples} examples to {save_dir}")
+        print(f"Saved split '{split}' with {len(inputs)} examples to {save_dir}")
 
 
 @cli.command(singleton=True)
