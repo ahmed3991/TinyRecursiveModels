@@ -48,46 +48,46 @@ def _find_columns(df) -> (str, str):
     """Heuristic to pick question and answer columns from the dataframe."""
     cols = [c.lower() for c in df.columns]
 
-    q_candidates = ["question", "prompt", "input", "problem", "context"]
-    a_candidates = ["answer", "target", "output", "solution", "completion", "final_answer"]
+    #q_candidates = ["question", "prompt", "input", "problem", "context"]
+    #a_candidates = ["answer", "target", "output", "solution", "completion", "final_answer","expected_answer"]
 
-    qcol = None
-    acol = None
+    qcol = "problem"
+    acol = "expected_answer"
 
-    for c in q_candidates:
-        for orig in df.columns:
-            if orig.lower() == c:
-                qcol = orig
-                break
-        if qcol:
-            break
+    # for c in q_candidates:
+    #     for orig in df.columns:
+    #         if orig.lower() == c:
+    #             qcol = orig
+    #             break
+    #     if qcol:
+    #         break
 
-    for c in a_candidates:
-        for orig in df.columns:
-            if orig.lower() == c:
-                acol = orig
-                break
-        if acol:
-            break
+    # for c in a_candidates:
+    #     for orig in df.columns:
+    #         if orig.lower() == c:
+    #             acol = orig
+    #             break
+    #     if acol:
+    #         break
 
-    # Some datasets use 'input' and 'output' or 'prompt' and 'completion'
-    if qcol is None:
-        # fallback to first textual column
-        for orig in df.columns:
-            if df[orig].dtype == object:
-                qcol = orig
-                break
+    # # Some datasets use 'input' and 'output' or 'prompt' and 'completion'
+    # if qcol is None:
+    #     # fallback to first textual column
+    #     for orig in df.columns:
+    #         if df[orig].dtype == object:
+    #             qcol = orig
+    #             break
 
-    if acol is None:
-        # fallback to a column named like 'answer' else use a blank label
-        if "answer" in df.columns:
-            acol = "answer"
-        else:
-            # try any other object column different from qcol
-            for orig in df.columns:
-                if orig != qcol and df[orig].dtype == object:
-                    acol = orig
-                    break
+    # if acol is None:
+    #     # fallback to a column named like 'answer' else use a blank label
+    #     if "answer" in df.columns:
+    #         acol = "answer"
+    #     else:
+    #         # try any other object column different from qcol
+    #         for orig in df.columns:
+    #             if orig != qcol and df[orig].dtype == object:
+    #                 acol = orig
+    #                 break
 
     return qcol, acol
 
