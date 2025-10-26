@@ -104,7 +104,16 @@ def convert_dataset(config: DataProcessConfig):
     if "split" in df.columns:
         split_values = list(df["split"].unique())
     else:
-        split_values = ["all"]
+        # Create 90% train, 10% test split
+        total_samples = len(df)
+        train_size = int(0.9 * total_samples)
+        
+        # Shuffle and split the dataframe
+        df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+        df["split"] = "train"
+        df.loc[train_size:, "split"] = "test"
+        split_values = ["train", "test"]
+        print(f"Created train/test split: {train_size}/{total_samples-train_size} examples")
 
     # Find question/answer columns heuristically
     qcol, acol = _find_columns(df)
