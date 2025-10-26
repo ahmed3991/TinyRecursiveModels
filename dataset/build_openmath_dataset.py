@@ -91,7 +91,7 @@ def _find_columns(df) -> (str, str):
 
     return qcol, acol
 
-
+# ...existing code...
 def convert_dataset(config: DataProcessConfig):
     # Download parquet
     print(f"Downloading {config.parquet_path} from {config.source_repo}...")
@@ -120,31 +120,37 @@ def convert_dataset(config: DataProcessConfig):
     if qcol is None:
         raise RuntimeError(f"Could not find a text column for inputs. Available columns: {list(df.columns)}")
 
-    max_seq_len = 0  # Initialize max_seq_len
+    # Build global charset and determine max sequence length across the whole dataframe
+    charset = set()
+    computed_max_seq = 0
+    for i, row in tqdm(df.iterrows(), total=len(df), desc="Scanning all examples for vocab/seq_len"):
+        q = str(row.get(qcol, "") or "")
+        a = str(row.get(acol, "") or "")
+        computed_max_seq = max(computed_max_seq, len(q), len(a))
+        charset.update(q)
+        charset.update(a)
 
-    # First pass to determine max_seq_len
-    for split in split_values:
-        if split == "all":
-            subdf = df
-        else:
-            subdf = df[df["split"] == split]
+    # Determine final seq_len (use config.max_seq_len if provided)
+    if config.max_seq_len is not None:
+        if config.max_seq_len < computed_max_seq:
+            print(f"Warning: config.max_seq_len ({config.max_seq_len}) < max found ({computed_max_seq}). "
+                  f"Sequences will be truncated to {config.max_seq_len}.")
+        max_seq_len = config.max_seq_len
+    else:
+        max_seq_len = computed_max_seq
 
-        inputs: List[str] = []
-        labels: List[str] = []
+    # Build char2id mapping (reserve 0 for PAD)
+    sorted_chars = sorted(ch for ch in charset if ch != "")  # exclude empty-string if present
+    char2id = {ch: idx + 1 for idx, ch in enumerate(sorted_chars)}  # 1..N, 0 is PAD
 
-        for i, row in tqdm(subdf.iterrows(), total=len(subdf), desc=f"Collecting ({split})"):
-            q = row.get(qcol, "")
-            a = row.get(acol, "")
+    # Prepare to save vocab/identifiers once
+    os.makedirs(config.output_dir, exist_ok=True)
+    with open(os.path.join(config.output_dir, "identifiers.json"), "w") as f:
+        json.dump(["<blank>"], f)
+    with open(os.path.join(config.output_dir, "char_vocab.json"), "w") as f:
+        json.dump({"char2id": char2id, "seq_len": max_seq_len}, f)
 
-            inputs.append(str(q))
-            labels.append(str(a))
-
-        # Calculate max sequence length for this split
-        max_inp = max((len(s) for s in inputs), default=0)
-        max_lab = max((len(s) for s in labels), default=0)
-        max_seq_len = max(max_seq_len, max(max_inp, max_lab))
-
-    # Second pass to encode with the determined max_seq_len
+    # Encode and save per split using the global max_seq_len and char2id
     for split in split_values:
         if split == "all":
             subdf = df
@@ -226,15 +232,8 @@ def convert_dataset(config: DataProcessConfig):
         for k, v in results_np.items():
             np.save(os.path.join(save_dir, f"all__{k}.npy"), v)
 
-        # Save identifier mapping and char mapping
-        with open(os.path.join(config.output_dir, "identifiers.json"), "w") as f:
-            json.dump(["<blank>"], f)
-
-        # Save character vocabulary for reproducibility
-        with open(os.path.join(config.output_dir, "char_vocab.json"), "w") as f:
-            json.dump({"char2id": char2id, "seq_len": max_seq_len}, f)
-
         print(f"Saved split '{split}' with {len(inputs)} examples to {save_dir}")
+# ...existing code...
 
 
 @cli.command(singleton=True)
